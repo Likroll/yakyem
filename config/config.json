@@ -1,6 +1,7 @@
 {
 	"active": true,
 	"keepItemsFoundInRaid": false,
+	"keepItemsInSecureContainer": true,
 	"retainFoundInRaidStatus": true,
 	"useSacredAmulet": true,
 	"saveVitality": false

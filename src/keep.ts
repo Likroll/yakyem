@@ -23,6 +23,9 @@ import { TimeUtil } from "@spt/utils/TimeUtil";
 import { inject, injectable } from "tsyringe";
 import { KConfig } from "./KConfig";
 import { PlayerRaidEndState } from "@spt/models/enums/PlayerRaidEndState";
+import { Item } from "@spt/models/eft/common/tables/IItem";
+import { EquipmentSlots } from "@spt/models/enums/EquipmentSlots";
+import { IPmcData } from "@spt/models/eft/common/IPmcData";
 
 @injectable()
 export class KeepEquipment extends InraidController {
@@ -66,10 +69,11 @@ export class KeepEquipment extends InraidController {
 		}
 
 		const currentProfile = this.saveServer.getProfile(sessionID);
-		const pmcData = currentProfile.characters.pmc;
+		let pmcData: IPmcData = currentProfile.characters.pmc;
 
 		currentProfile.inraid.character = "pmc";
 
+		// Sets xp, fatigue, location status, encyclopedia, task condition counters
 		this.inRaidHelper.updateProfileBaseStats(pmcData, postRaidData, sessionID);
 
 		if (!this.config.retainFoundInRaidStatus) {
@@ -79,10 +83,18 @@ export class KeepEquipment extends InraidController {
 		postRaidData.profile.Inventory.items = 
 			this.itemHelper.replaceIDs(postRaidData.profile.Inventory.items, postRaidData.profile,  pmcData.InsuredItems, postRaidData.profile.Inventory.fastPanel);
 
+		
 		this.inRaidHelper.addStackCountToMoneyFromRaid(postRaidData.profile.Inventory.items);
 
 		if (this.config.keepItemsFoundInRaid) {
 			this.inRaidHelper.setInventory(sessionID, pmcData, postRaidData.profile);
+		} else if (this.config.keepItemsInSecureContainer) {
+			const securedContainer = this.getSecuredContainerAndChildren(postRaidData.profile.Inventory.items);
+			
+			if (securedContainer) {
+				pmcData = this.profileHelper.removeSecureContainer(pmcData);
+				pmcData.Inventory.items = pmcData.Inventory.items.concat(securedContainer);
+			}
 		}
 
 		if (this.config.saveVitality) {
@@ -114,4 +126,19 @@ export class KeepEquipment extends InraidController {
 		}
 	}
 
+	private getSecuredContainerAndChildren(items: Item[]): Item[] | undefined {
+		const secureContainer = items.find((x) => x.slotId === EquipmentSlots.SECURED_CONTAINER);
+		if (secureContainer) {
+			const children: Item[] = [];
+			for (const item of items) {
+				if (item.parentId == secureContainer._id)  {
+					children.push(item);
+				}
+			}
+
+			return [secureContainer, ... children];
+		}
+
+		return undefined;
+	}
 }
