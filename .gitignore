@@ -1,0 +1,5 @@
+/node_modules
+/types
+/dist
+src/*.js
+src/*.js.map
