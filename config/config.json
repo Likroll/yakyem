@@ -4,5 +4,31 @@
 	"keepItemsInSecureContainer": true,
 	"retainFoundInRaidStatus": true,
 	"useSacredAmulet": true,
-	"saveVitality": false
+	"saveVitality": false,
+
+	"profileSaving": {
+		"level": true,
+		"experience": true,
+		"skills": true,
+		"stats": true,
+		"encyclopedia": true,
+		"questProgress": true,
+		"survivorClass": true
+	},
+	"equipmentSaving": {
+		"Headwear": true,
+		"Earpiece": true,
+		"FaceCover": true,
+		"ArmorVest": true,
+		"Eyewear": true,
+		"ArmBand": true,
+		"TacticalVest": true,
+		"Pockets": true,
+		"Backpack": true,
+		"FirstPrimaryWeapon": true,
+		"SecondPrimaryWeapon": true,
+		"Holster": true,
+		"Scabbard": true
+	}
+	
 }

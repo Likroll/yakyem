@@ -25,7 +25,7 @@ import { KConfig } from "./KConfig";
 import { PlayerRaidEndState } from "@spt/models/enums/PlayerRaidEndState";
 import { Item } from "@spt/models/eft/common/tables/IItem";
 import { EquipmentSlots } from "@spt/models/enums/EquipmentSlots";
-import { IPmcData } from "@spt/models/eft/common/IPmcData";
+import { IPmcData, IPostRaidPmcData } from "@spt/models/eft/common/IPmcData";
 
 @injectable()
 export class KeepEquipment extends InraidController {
@@ -69,33 +69,23 @@ export class KeepEquipment extends InraidController {
 		}
 
 		const currentProfile = this.saveServer.getProfile(sessionID);
-		let pmcData: IPmcData = currentProfile.characters.pmc;
+		const pmcData: IPmcData = currentProfile.characters.pmc;
 
 		currentProfile.inraid.character = "pmc";
 
-		// Sets xp, fatigue, location status, encyclopedia, task condition counters
-		this.inRaidHelper.updateProfileBaseStats(pmcData, postRaidData, sessionID);
-
+		// Sets xp, skill fatigue, location status, encyclopedia, etc
+		this.updateStats(pmcData, postRaidData, sessionID);
+		
 		if (!this.config.retainFoundInRaidStatus) {
 			postRaidData.profile = this.inRaidHelper.removeSpawnedInSessionPropertyFromItems(postRaidData.profile);
 		}
 
 		postRaidData.profile.Inventory.items = 
 			this.itemHelper.replaceIDs(postRaidData.profile.Inventory.items, postRaidData.profile,  pmcData.InsuredItems, postRaidData.profile.Inventory.fastPanel);
-
 		
 		this.inRaidHelper.addStackCountToMoneyFromRaid(postRaidData.profile.Inventory.items);
 
-		if (this.config.keepItemsFoundInRaid) {
-			this.inRaidHelper.setInventory(sessionID, pmcData, postRaidData.profile);
-		} else if (this.config.keepItemsInSecureContainer) {
-			const securedContainer = this.getSecuredContainerAndChildren(postRaidData.profile.Inventory.items);
-			
-			if (securedContainer) {
-				pmcData = this.profileHelper.removeSecureContainer(pmcData);
-				pmcData.Inventory.items = pmcData.Inventory.items.concat(securedContainer);
-			}
-		}
+		this.handleInventory(pmcData, postRaidData.profile);
 
 		if (this.config.saveVitality) {
 			this.healthHelper.saveVitality(pmcData, postRaidData.health, sessionID);
@@ -126,17 +116,149 @@ export class KeepEquipment extends InraidController {
 		}
 	}
 
+	private updateStats(profileData: IPmcData, saveProgress: ISaveProgressRequestData, sessionID: string) {
+		// Resets skill fatigue, I see no reason to have this be configurable.
+		for (const skill of saveProgress.profile.Skills.Common) {
+			skill.PointsEarnedDuringSession = 0.0;
+		}
+
+		// Level
+		if (this.config.profileSaving.level) {
+			profileData.Info.Level = saveProgress.profile.Info.Level;
+		}
+
+		// Skills
+		if (this.config.profileSaving.skills) {
+			profileData.Skills = saveProgress.profile.Skills;
+		}
+
+		// Stats
+		if (this.config.profileSaving.stats) {
+			profileData.Stats.Eft = saveProgress.profile.Stats.Eft;
+		}
+		
+		// Encyclopedia
+		if (this.config.profileSaving.encyclopedia) {
+			profileData.Encyclopedia = saveProgress.profile.Encyclopedia;
+		}
+		
+		// Quest progress
+		if (this.config.profileSaving.questProgress) {
+			profileData.TaskConditionCounters = saveProgress.profile.TaskConditionCounters;
+
+			this.validateTaskConditionCounters(saveProgress, profileData);
+		}
+		
+		// Survivor class
+		if (this.config.profileSaving.survivorClass) {
+			profileData.SurvivorClass = saveProgress.profile.SurvivorClass;
+		}
+
+		// Experience
+		if (this.config.profileSaving.experience) {
+			profileData.Info.Experience += profileData.Stats.Eft.TotalSessionExperience;
+			profileData.Stats.Eft.TotalSessionExperience = 0;
+		}
+
+		this.saveServer.getProfile(sessionID).inraid.location = "none";
+	}
+
+	// I just yoinked this straight from InRaidHelper
+	private validateTaskConditionCounters(saveProgressRequest: ISaveProgressRequestData,profileData: IPmcData): void {
+		for (const backendCounterKey in saveProgressRequest.profile.TaskConditionCounters) {
+			// Skip counters with no id
+			if (!saveProgressRequest.profile.TaskConditionCounters[backendCounterKey].id) {
+				continue;
+			}
+
+			const postRaidValue = saveProgressRequest.profile.TaskConditionCounters[backendCounterKey]?.value;
+			if (typeof postRaidValue === "undefined") {
+				// No value, skip
+				continue;
+			}
+
+			const matchingPreRaidCounter = profileData.TaskConditionCounters[backendCounterKey];
+			if (!matchingPreRaidCounter) {
+				this.logger.error(this.localisationService.getText("inraid-unable_to_find_key_in_taskconditioncounters", backendCounterKey));
+
+				continue;
+			}
+
+			if (matchingPreRaidCounter.value !== postRaidValue) {
+				this.logger.error(this.localisationService.getText("inraid-taskconditioncounter_keys_differ",
+					{ key: backendCounterKey, oldValue: matchingPreRaidCounter.value, newValue: postRaidValue }));
+			}
+		}
+	}
+
+	private handleInventory(profileData: IPmcData, saveProgress: IPostRaidPmcData) {
+		let keptItems: Item[] = [];
+
+		if (this.config.keepItemsFoundInRaid) { // Keep all items found in raid
+			this.removeItem(profileData, profileData.Inventory.equipment);
+			this.removeItem(profileData, profileData.Inventory.questRaidItems);
+			this.removeItem(profileData, profileData.Inventory.sortingTable);
+	
+			for (const item of saveProgress.Inventory.items) {
+				const itemWithChildren = this.itemHelper.findAndReturnChildrenAsItems(saveProgress.Inventory.items, item._id);
+	
+				if (item.slotId) {
+					if (this.config.equipmentSaving[item.slotId] || item.slotId == EquipmentSlots.SECURED_CONTAINER) {
+						keptItems = [...keptItems, ...itemWithChildren];
+					}
+				} else {
+					keptItems.push(item);
+				}
+			}
+		} else if (this.config.keepItemsInSecureContainer) { // Revert back to original kit, but keep secure container
+			profileData = this.profileHelper.removeSecureContainer(profileData);
+			const secureContainer = this.getSecuredContainerAndChildren(saveProgress.Inventory.items);
+			keptItems = secureContainer;
+		}
+		
+		profileData.Inventory.items = [...keptItems, ...profileData.Inventory.items];
+		profileData.Inventory.fastPanel = saveProgress.Inventory.fastPanel; // Quick access items bar
+		profileData.InsuredItems = [];
+	}
+
+	private removeItem(profile: IPmcData, itemId: string) {
+		if (!itemId) {
+			this.logger.warning(this.localisationService.getText("inventory-unable_to_remove_item_no_id_given"));
+
+			return;
+		}
+
+		// Get children of item, they get deleted too
+		const itemToRemoveWithChildren = this.itemHelper.findAndReturnChildrenByItems(profile.Inventory.items, itemId);
+		const inventoryItems = profile.Inventory.items;
+		const insuredItems = profile.InsuredItems;
+
+		for (const childId of itemToRemoveWithChildren) {
+			// We expect that each inventory item and each insured item has unique "_id", respective "itemId".
+			// Therefore we want to use a NON-Greedy function and escape the iteration as soon as we find requested item.
+			const inventoryIndex = inventoryItems.findIndex((item) => item._id === childId);
+			if (inventoryIndex !== -1) {
+				inventoryItems.splice(inventoryIndex, 1);
+			} else {
+				this.logger.warning(
+					this.localisationService.getText("inventory-unable_to_remove_item_id_not_found", {
+						childId: childId,
+						profileId: profile._id
+					})
+				);
+			}
+
+			const insuredIndex = insuredItems.findIndex((item) => item.itemId === childId);
+			if (insuredIndex !== -1) {
+				insuredItems.splice(insuredIndex, 1);
+			}
+		}
+	}
+
 	private getSecuredContainerAndChildren(items: Item[]): Item[] | undefined {
 		const secureContainer = items.find((x) => x.slotId === EquipmentSlots.SECURED_CONTAINER);
 		if (secureContainer) {
-			const children: Item[] = [];
-			for (const item of items) {
-				if (item.parentId == secureContainer._id)  {
-					children.push(item);
-				}
-			}
-
-			return [secureContainer, ... children];
+			return this.itemHelper.findAndReturnChildrenAsItems(items, secureContainer._id);
 		}
 
 		return undefined;
