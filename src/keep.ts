@@ -85,7 +85,7 @@ export class KeepEquipment extends InraidController {
 		
 		this.inRaidHelper.addStackCountToMoneyFromRaid(postRaidData.profile.Inventory.items);
 
-		this.handleInventory(pmcData, postRaidData.profile);
+		this.handleInventory(pmcData, postRaidData.profile, sessionID);
 
 		if (this.config.saveVitality) {
 			this.healthHelper.saveVitality(pmcData, postRaidData.health, sessionID);
@@ -116,7 +116,7 @@ export class KeepEquipment extends InraidController {
 		}
 	}
 
-	private updateStats(profileData: IPmcData, saveProgress: ISaveProgressRequestData, sessionID: string) {
+	private updateStats(profileData: IPmcData, saveProgress: ISaveProgressRequestData, sessionID: string): void {
 		// Resets skill fatigue, I see no reason to have this be configurable.
 		for (const skill of saveProgress.profile.Skills.Common) {
 			skill.PointsEarnedDuringSession = 0.0;
@@ -191,14 +191,17 @@ export class KeepEquipment extends InraidController {
 		}
 	}
 
-	private handleInventory(profileData: IPmcData, saveProgress: IPostRaidPmcData) {
+	private handleInventory(profileData: IPmcData, saveProgress: IPostRaidPmcData, sessionID: string): void {
 		let keptItems: Item[] = [];
 
 		if (this.config.keepItemsFoundInRaid) { // Keep all items found in raid
+			this.inRaidHelper.setInventory(sessionID, profileData, saveProgress);
+			return;
+		}  { // Revert back to original kit, but keep secure container
 			this.removeItem(profileData, profileData.Inventory.equipment);
 			this.removeItem(profileData, profileData.Inventory.questRaidItems);
 			this.removeItem(profileData, profileData.Inventory.sortingTable);
-	
+
 			for (const item of saveProgress.Inventory.items) {
 				const itemWithChildren = this.itemHelper.findAndReturnChildrenAsItems(saveProgress.Inventory.items, item._id);
 	
@@ -210,10 +213,12 @@ export class KeepEquipment extends InraidController {
 					keptItems.push(item);
 				}
 			}
-		} else if (this.config.keepItemsInSecureContainer) { // Revert back to original kit, but keep secure container
-			profileData = this.profileHelper.removeSecureContainer(profileData);
-			const secureContainer = this.getSecuredContainerAndChildren(saveProgress.Inventory.items);
-			keptItems = secureContainer;
+
+			if (this.config.keepItemsInSecureContainer) {
+				profileData = this.profileHelper.removeSecureContainer(profileData);
+				const secureContainer = this.getSecuredContainerAndChildren(saveProgress.Inventory.items);
+				keptItems = secureContainer;
+			}
 		}
 		
 		profileData.Inventory.items = [...keptItems, ...profileData.Inventory.items];
@@ -221,7 +226,7 @@ export class KeepEquipment extends InraidController {
 		profileData.InsuredItems = [];
 	}
 
-	private removeItem(profile: IPmcData, itemId: string) {
+	private removeItem(profile: IPmcData, itemId: string): void {
 		if (!itemId) {
 			this.logger.warning(this.localisationService.getText("inventory-unable_to_remove_item_no_id_given"));
 

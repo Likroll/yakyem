@@ -11,3 +11,6 @@ To enable/disable a feature, simple change between true(on) and false(off).
 `retainFoundInRaidStatus` : Should items found in raid, retain that status on death.\
 `useSacredAmulet` : Should the [Sacred Amulet](https://escapefromtarkov.fandom.com/wiki/Sacred_Amulet) be used.\
 `saveVitality` : Should health, status effects, energy, hydration, etc be saved. You will be set back to normal health upon death if disabled.
+
+`profileSaving` : What parts of the profile should be saved on death.
+`equipmentSaving` : Which equipment should be saved on death, only used if `keepItemsFoundInRaid` is false
