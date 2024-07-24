@@ -25,7 +25,7 @@ import { KConfig } from "./KConfig";
 import { PlayerRaidEndState } from "@spt/models/enums/PlayerRaidEndState";
 import { Item } from "@spt/models/eft/common/tables/IItem";
 import { EquipmentSlots } from "@spt/models/enums/EquipmentSlots";
-import { IPmcData, IPostRaidPmcData } from "@spt/models/eft/common/IPmcData";
+import { IPmcData } from "@spt/models/eft/common/IPmcData";
 
 @injectable()
 export class KeepEquipment extends InraidController {
@@ -69,7 +69,7 @@ export class KeepEquipment extends InraidController {
 		}
 
 		const currentProfile = this.saveServer.getProfile(sessionID);
-		const pmcData: IPmcData = currentProfile.characters.pmc;
+		let pmcData: IPmcData = currentProfile.characters.pmc;
 
 		currentProfile.inraid.character = "pmc";
 
@@ -85,7 +85,16 @@ export class KeepEquipment extends InraidController {
 		
 		this.inRaidHelper.addStackCountToMoneyFromRaid(postRaidData.profile.Inventory.items);
 
-		this.handleInventory(pmcData, postRaidData.profile, sessionID);
+		if (this.config.keepItemsFoundInRaid) {
+			this.inRaidHelper.setInventory(sessionID, pmcData, postRaidData.profile);
+		} else if (this.config.keepItemsInSecureContainer) {
+			const securedContainer = this.getSecuredContainerAndChildren(postRaidData.profile.Inventory.items);
+
+			if (securedContainer) {
+				pmcData = this.profileHelper.removeSecureContainer(pmcData);
+				pmcData.Inventory.items = pmcData.Inventory.items.concat(securedContainer);
+			}
+		}
 
 		if (this.config.saveVitality) {
 			this.healthHelper.saveVitality(pmcData, postRaidData.health, sessionID);
@@ -132,10 +141,8 @@ export class KeepEquipment extends InraidController {
 			profileData.Skills = saveProgress.profile.Skills;
 		}
 
-		// Stats
-		if (this.config.profileSaving.stats) {
-			profileData.Stats.Eft = saveProgress.profile.Stats.Eft;
-		}
+		// Stats, not going to allow disabling as I'm not quite sure what this does.
+		profileData.Stats.Eft = saveProgress.profile.Stats.Eft;
 		
 		// Encyclopedia
 		if (this.config.profileSaving.encyclopedia) {
@@ -191,74 +198,84 @@ export class KeepEquipment extends InraidController {
 		}
 	}
 
-	private handleInventory(profileData: IPmcData, saveProgress: IPostRaidPmcData, sessionID: string): void {
-		let keptItems: Item[] = [];
+	// private handleInventory(profileData: IPmcData, saveProgress: IPostRaidPmcData, sessionID: string): void {
+	// 	if (this.config.keepItemsFoundInRaid) { // Keep all items found in raid
+	// 		this.inRaidHelper.setInventory(sessionID, profileData, saveProgress);
+	// 	} else { // Revert back to original kit
+	// 		let keptItems: Item[] = [];
 
-		if (this.config.keepItemsFoundInRaid) { // Keep all items found in raid
-			this.inRaidHelper.setInventory(sessionID, profileData, saveProgress);
-			return;
-		}  { // Revert back to original kit, but keep secure container
-			this.removeItem(profileData, profileData.Inventory.equipment);
-			this.removeItem(profileData, profileData.Inventory.questRaidItems);
-			this.removeItem(profileData, profileData.Inventory.sortingTable);
+	// 		this.removeItem(profileData, profileData.Inventory.questRaidItems);
+	// 		this.removeItem(profileData, profileData.Inventory.sortingTable);
 
-			for (const item of saveProgress.Inventory.items) {
-				const itemWithChildren = this.itemHelper.findAndReturnChildrenAsItems(saveProgress.Inventory.items, item._id);
-	
-				if (item.slotId) {
-					if (this.config.equipmentSaving[item.slotId] || item.slotId == EquipmentSlots.SECURED_CONTAINER) {
-						keptItems = [...keptItems, ...itemWithChildren];
-					}
-				} else {
-					keptItems.push(item);
-				}
-			}
+	// 		this.logger.info(profileData.Inventory.equipment);
 
-			if (this.config.keepItemsInSecureContainer) {
-				profileData = this.profileHelper.removeSecureContainer(profileData);
-				const secureContainer = this.getSecuredContainerAndChildren(saveProgress.Inventory.items);
-				keptItems = secureContainer;
-			}
-		}
-		
-		profileData.Inventory.items = [...keptItems, ...profileData.Inventory.items];
-		profileData.Inventory.fastPanel = saveProgress.Inventory.fastPanel; // Quick access items bar
-		profileData.InsuredItems = [];
-	}
+	// 		// Select which slots we want to keep
+	// 		for (const item of profileData.Inventory.items) {
+	// 			const itemWithChildren = this.itemHelper.findAndReturnChildrenAsItems(profileData.Inventory.items, item._id);
 
-	private removeItem(profile: IPmcData, itemId: string): void {
-		if (!itemId) {
-			this.logger.warning(this.localisationService.getText("inventory-unable_to_remove_item_no_id_given"));
+	// 			if (item.slotId) {
+	// 				if (this.config.equipmentSaving[item.slotId] || item.slotId == "hideout") {
+	// 					keptItems = [...keptItems, ...itemWithChildren];
+	// 				} else if (!this.config.keepItemsInSecureContainer && item.slotId == EquipmentSlots.SECURED_CONTAINER) {
+	// 					keptItems = [...keptItems, ...itemWithChildren];
+	// 				} else {
+	// 					this.removeItem(profileData, item._id);
+	// 				}
+	// 			} else {
+	// 				keptItems.push(item);
+	// 			}
+	// 		}
 
-			return;
-		}
+	// 		if (this.config.keepItemsInSecureContainer) {
+	// 			const original = profileData.Inventory.items.find((x) => x.slotId === "SecuredContainer");
+	// 			if (original) {
+	// 				this.removeItem(profileData, original._id);
+	// 			}
 
-		// Get children of item, they get deleted too
-		const itemToRemoveWithChildren = this.itemHelper.findAndReturnChildrenByItems(profile.Inventory.items, itemId);
-		const inventoryItems = profile.Inventory.items;
-		const insuredItems = profile.InsuredItems;
+	// 			const secureContainer = this.getSecuredContainerAndChildren(saveProgress.Inventory.items);
 
-		for (const childId of itemToRemoveWithChildren) {
-			// We expect that each inventory item and each insured item has unique "_id", respective "itemId".
-			// Therefore we want to use a NON-Greedy function and escape the iteration as soon as we find requested item.
-			const inventoryIndex = inventoryItems.findIndex((item) => item._id === childId);
-			if (inventoryIndex !== -1) {
-				inventoryItems.splice(inventoryIndex, 1);
-			} else {
-				this.logger.warning(
-					this.localisationService.getText("inventory-unable_to_remove_item_id_not_found", {
-						childId: childId,
-						profileId: profile._id
-					})
-				);
-			}
+	// 			keptItems = [...keptItems, ...secureContainer];
+	// 		}
 
-			const insuredIndex = insuredItems.findIndex((item) => item.itemId === childId);
-			if (insuredIndex !== -1) {
-				insuredItems.splice(insuredIndex, 1);
-			}
-		}
-	}
+	// 		profileData.Inventory.items = keptItems;
+	// 		profileData.Inventory.fastPanel = saveProgress.Inventory.fastPanel; // Quick access items bar
+	// 		profileData.InsuredItems = [];
+	// 	}
+	// }
+
+	// private removeItem(profile: IPmcData, itemId: string): void {
+	// 	if (!itemId) {
+	// 		this.logger.warning(this.localisationService.getText("inventory-unable_to_remove_item_no_id_given"));
+
+	// 		return;
+	// 	}
+
+	// 	// Get children of item, they get deleted too
+	// 	const itemToRemoveWithChildren = this.itemHelper.findAndReturnChildrenByItems(profile.Inventory.items, itemId);
+	// 	const inventoryItems = profile.Inventory.items;
+	// 	const insuredItems = profile.InsuredItems;
+
+	// 	for (const childId of itemToRemoveWithChildren) {
+	// 		// We expect that each inventory item and each insured item has unique "_id", respective "itemId".
+	// 		// Therefore we want to use a NON-Greedy function and escape the iteration as soon as we find requested item.
+	// 		const inventoryIndex = inventoryItems.findIndex((item) => item._id === childId);
+	// 		if (inventoryIndex !== -1) {
+	// 			inventoryItems.splice(inventoryIndex, 1);
+	// 		} else {
+	// 			this.logger.warning(
+	// 				this.localisationService.getText("inventory-unable_to_remove_item_id_not_found", {
+	// 					childId: childId,
+	// 					profileId: profile._id
+	// 				})
+	// 			);
+	// 		}
+
+	// 		const insuredIndex = insuredItems.findIndex((item) => item.itemId === childId);
+	// 		if (insuredIndex !== -1) {
+	// 			insuredItems.splice(insuredIndex, 1);
+	// 		}
+	// 	}
+	// }
 
 	private getSecuredContainerAndChildren(items: Item[]): Item[] | undefined {
 		const secureContainer = items.find((x) => x.slotId === EquipmentSlots.SECURED_CONTAINER);
