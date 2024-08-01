@@ -7,11 +7,12 @@
 	"saveVitality": false,
 
 	"profileSaving": {
-		"level": true,
-		"experience": true,
-		"skills": true,
-		"encyclopedia": true,
-		"questProgress": true,
-		"survivorClass": true
+		"level": false,
+		"experience": false,
+		"skills": false,
+		"encyclopedia": false,
+		"questProgress": false,
+		"survivorClass": false,
+		"stats": false
 	}
 }

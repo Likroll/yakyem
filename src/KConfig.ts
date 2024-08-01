@@ -12,6 +12,7 @@ export type KConfig = {
 		skills: boolean;
 		encyclopedia: boolean;
 		questProgress: boolean;
-		survivorClass: boolean
+		survivorClass: boolean;
+		stats: boolean;
 	};
 };
