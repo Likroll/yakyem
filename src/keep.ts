@@ -26,7 +26,8 @@ import { PlayerRaidEndState } from "@spt/models/enums/PlayerRaidEndState";
 import { Item } from "@spt/models/eft/common/tables/IItem";
 import { EquipmentSlots } from "@spt/models/enums/EquipmentSlots";
 import { IPmcData } from "@spt/models/eft/common/IPmcData";
-import { IEftStats } from "@spt/models/eft/common/tables/IBotBase";
+import { BodyPartHealth as IBotHealth } from "@spt/models/eft/common/tables/IBotBase";
+import { BodyPartHealth as ISyncHealth } from "@spt/models/eft/health/ISyncHealthRequestData";
 
 @injectable()
 export class KeepEquipment extends InraidController {
@@ -70,42 +71,53 @@ export class KeepEquipment extends InraidController {
 		}
 
 		const currentProfile = this.saveServer.getProfile(sessionID);
-		let pmcData: IPmcData = currentProfile.characters.pmc;
+		let preRaidData: IPmcData = currentProfile.characters.pmc;
 
 		currentProfile.inraid.character = "pmc";
 
 		// Sets xp, skill fatigue, location status, encyclopedia, etc
-		this.updateProfile(pmcData, postRaidData, sessionID);
+		this.updateProfile(preRaidData, postRaidData, sessionID);
 		
 		if (!this.config.retainFoundInRaidStatus) {
 			postRaidData.profile = this.inRaidHelper.removeSpawnedInSessionPropertyFromItems(postRaidData.profile);
 		}
 
 		postRaidData.profile.Inventory.items = 
-			this.itemHelper.replaceIDs(postRaidData.profile.Inventory.items, postRaidData.profile,  pmcData.InsuredItems, postRaidData.profile.Inventory.fastPanel);
+			this.itemHelper.replaceIDs(postRaidData.profile.Inventory.items, postRaidData.profile,  preRaidData.InsuredItems, postRaidData.profile.Inventory.fastPanel);
 		
 		this.inRaidHelper.addStackCountToMoneyFromRaid(postRaidData.profile.Inventory.items);
 
 		if (this.config.keepItemsFoundInRaid) {
-			this.inRaidHelper.setInventory(sessionID, pmcData, postRaidData.profile);
+			this.inRaidHelper.setInventory(sessionID, preRaidData, postRaidData.profile);
 		} else if (this.config.keepItemsInSecureContainer) {
 			const securedContainer = this.getSecuredContainerAndChildren(postRaidData.profile.Inventory.items);
 
 			if (securedContainer) {
-				pmcData = this.profileHelper.removeSecureContainer(pmcData);
-				pmcData.Inventory.items = pmcData.Inventory.items.concat(securedContainer);
+				preRaidData = this.profileHelper.removeSecureContainer(preRaidData);
+				preRaidData.Inventory.items = preRaidData.Inventory.items.concat(securedContainer);
 			}
 		}
 
 		if (this.config.saveVitality) {
-			this.healthHelper.saveVitality(pmcData, postRaidData.health, sessionID);
+			this.healthHelper.saveVitality(preRaidData, postRaidData.health, sessionID);
+		} else {
+			// This should remove any effects on the body
+			for (const id in preRaidData.Health.BodyParts) {
+				const bodyPart: IBotHealth = preRaidData.Health.BodyParts[id];
+				bodyPart.Effects = undefined;
+			}
+
+			for (const id in postRaidData.health.Health) {
+				const bodyPart: ISyncHealth = preRaidData.Health.BodyParts[id];
+				bodyPart.Effects = undefined;
+			}
 		}
 
 		if (this.config.useSacredAmulet) {
 			const locationName = currentProfile.inraid.location.toLowerCase();
 			if (locationName === "lighthouse" && postRaidData.profile.Info.Side.toLowerCase() === "usec") {
 				// Decrement counter if it exists, don't go below 0
-				const remainingCounter = pmcData?.Stats.Eft.OverallCounters.Items.find((x) =>
+				const remainingCounter = preRaidData?.Stats.Eft.OverallCounters.Items.find((x) =>
 					x.Key.includes("UsecRaidRemainKills")
 				);
 				if (remainingCounter?.Value > 0) {
@@ -116,17 +128,17 @@ export class KeepEquipment extends InraidController {
 
 		const isDead = this.isPlayerDead(postRaidData.exit);
 		if (isDead) {
-			this.pmcChatResponseService.sendKillerResponse(sessionID, pmcData, postRaidData.profile.Stats.Eft.Aggressor);
+			this.pmcChatResponseService.sendKillerResponse(sessionID, preRaidData, postRaidData.profile.Stats.Eft.Aggressor);
 			this.matchBotDetailsCacheService.clearCache();
 		}
 
 		const victims = postRaidData.profile.Stats.Eft.Victims.filter(x => x.Role === "sptBear" || x.Role === "sptUsec");
 		if (victims?.length > 0) {
-			this.pmcChatResponseService.sendVictimResponse(sessionID, victims, pmcData);
+			this.pmcChatResponseService.sendVictimResponse(sessionID, victims, preRaidData);
 		}
 	}
 
-	private updateProfile(profileData: IPmcData, saveProgress: ISaveProgressRequestData, sessionID: string): void {
+	private updateProfile(preRaidData: IPmcData, saveProgress: ISaveProgressRequestData, sessionID: string): void {
 		// Resets skill fatigue, I see no reason to have this be configurable.
 		for (const skill of saveProgress.profile.Skills.Common) {
 			skill.PointsEarnedDuringSession = 0.0;
@@ -134,40 +146,40 @@ export class KeepEquipment extends InraidController {
 
 		// Level
 		if (this.config.profileSaving.level) {
-			profileData.Info.Level = saveProgress.profile.Info.Level;
+			preRaidData.Info.Level = saveProgress.profile.Info.Level;
 		}
 
 		// Skills
 		if (this.config.profileSaving.skills) {
-			profileData.Skills = saveProgress.profile.Skills;
+			preRaidData.Skills = saveProgress.profile.Skills;
 		}
 
 		// Stats
 		if (this.config.profileSaving.stats) {
-			profileData.Stats.Eft = saveProgress.profile.Stats.Eft;
+			preRaidData.Stats.Eft = saveProgress.profile.Stats.Eft;
 		}
 		
 		// Encyclopedia
 		if (this.config.profileSaving.encyclopedia) {
-			profileData.Encyclopedia = saveProgress.profile.Encyclopedia;
+			preRaidData.Encyclopedia = saveProgress.profile.Encyclopedia;
 		}
 		
 		// Quest progress
 		if (this.config.profileSaving.questProgress) {
-			profileData.TaskConditionCounters = saveProgress.profile.TaskConditionCounters;
+			preRaidData.TaskConditionCounters = saveProgress.profile.TaskConditionCounters;
 
-			this.validateTaskConditionCounters(saveProgress, profileData);
+			this.validateTaskConditionCounters(saveProgress, preRaidData);
 		}
 		
 		// Survivor class
 		if (this.config.profileSaving.survivorClass) {
-			profileData.SurvivorClass = saveProgress.profile.SurvivorClass;
+			preRaidData.SurvivorClass = saveProgress.profile.SurvivorClass;
 		}
 
 		// Experience
 		if (this.config.profileSaving.experience) {
-			profileData.Info.Experience += profileData.Stats.Eft.TotalSessionExperience;
-			profileData.Stats.Eft.TotalSessionExperience = 0;
+			preRaidData.Info.Experience += preRaidData.Stats.Eft.TotalSessionExperience;
+			preRaidData.Stats.Eft.TotalSessionExperience = 0;
 		}
 
 		this.saveServer.getProfile(sessionID).inraid.location = "none";
@@ -178,7 +190,7 @@ export class KeepEquipment extends InraidController {
 	// }
 
 	// I just yoinked this straight from InRaidHelper
-	private validateTaskConditionCounters(saveProgressRequest: ISaveProgressRequestData,profileData: IPmcData): void {
+	private validateTaskConditionCounters(saveProgressRequest: ISaveProgressRequestData, preRaidData: IPmcData): void {
 		for (const backendCounterKey in saveProgressRequest.profile.TaskConditionCounters) {
 			// Skip counters with no id
 			if (!saveProgressRequest.profile.TaskConditionCounters[backendCounterKey].id) {
@@ -191,7 +203,7 @@ export class KeepEquipment extends InraidController {
 				continue;
 			}
 
-			const matchingPreRaidCounter = profileData.TaskConditionCounters[backendCounterKey];
+			const matchingPreRaidCounter = preRaidData.TaskConditionCounters[backendCounterKey];
 			if (!matchingPreRaidCounter) {
 				this.logger.error(this.localisationService.getText("inraid-unable_to_find_key_in_taskconditioncounters", backendCounterKey));
 
