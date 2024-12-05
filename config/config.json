@@ -1,10 +1,12 @@
 {
 	"active": true,
-	"keepItemsFoundInRaid": false,
-	"keepItemsInSecureContainer": true,
-	"retainFoundInRaidStatus": true,
-	"useSacredAmulet": true,
+	"keepItemsFoundInRaid": true,
+	"keepItemsInSecureContainer": false,
+	"retainFoundInRaidStatus": false,
 	"saveVitality": false,
+	"keepQuestItems": false,
+	"killerMessages": true,
+	"victimMessages": true,
 
 	"profileSaving": {
 		"level": true,

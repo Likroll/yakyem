@@ -3,8 +3,10 @@ export type KConfig = {
 	keepItemsFoundInRaid: boolean;
 	keepItemsInSecureContainer: boolean;
 	retainFoundInRaidStatus: boolean;
-	useSacredAmulet: boolean;
 	saveVitality: boolean;
+	keepQuestItems: boolean;
+	killerMessages: boolean;
+	victimMessages: boolean;
 
 	profileSaving: {
 		level: boolean;

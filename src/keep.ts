@@ -1,13 +1,10 @@
 import { ApplicationContext } from "@spt/context/ApplicationContext";
-import { InraidController } from "@spt/controllers/InraidController";
 import { PlayerScavGenerator } from "@spt/generators/PlayerScavGenerator";
 import { HealthHelper } from "@spt/helpers/HealthHelper";
 import { InRaidHelper } from "@spt/helpers/InRaidHelper";
-import { ItemHelper } from "@spt/helpers/ItemHelper";
 import { ProfileHelper } from "@spt/helpers/ProfileHelper";
 import { QuestHelper } from "@spt/helpers/QuestHelper";
 import { TraderHelper } from "@spt/helpers/TraderHelper";
-import { ISaveProgressRequestData } from "@spt/models/eft/inRaid/ISaveProgressRequestData";
 import { ILogger } from "@spt/models/spt/utils/ILogger";
 import { ConfigServer } from "@spt/servers/ConfigServer";
 import { SaveServer } from "@spt/servers/SaveServer";
@@ -17,80 +14,126 @@ import { LocalisationService } from "@spt/services/LocalisationService";
 import { MailSendService } from "@spt/services/MailSendService";
 import { MatchBotDetailsCacheService } from "@spt/services/MatchBotDetailsCacheService";
 import { PmcChatResponseService } from "@spt/services/PmcChatResponseService";
-import { TraderServicesService } from "@spt/services/TraderServicesService";
 import { RandomUtil } from "@spt/utils/RandomUtil";
 import { TimeUtil } from "@spt/utils/TimeUtil";
 import { inject, injectable } from "tsyringe";
 import { KConfig } from "./KConfig";
-import { PlayerRaidEndState } from "@spt/models/enums/PlayerRaidEndState";
-import { Item } from "@spt/models/eft/common/tables/IItem";
 import { EquipmentSlots } from "@spt/models/enums/EquipmentSlots";
 import { IPmcData } from "@spt/models/eft/common/IPmcData";
-import { BodyPartHealth as IBotHealth } from "@spt/models/eft/common/tables/IBotBase";
-import { BodyPartHealth as ISyncHealth } from "@spt/models/eft/health/ISyncHealthRequestData";
+import { LocationLifecycleService } from "@spt/services/LocationLifecycleService";
+import { HashUtil } from "@spt/utils/HashUtil";
+import { LocationLootGenerator } from "@spt/generators/LocationLootGenerator";
+import { LootGenerator } from "@spt/generators/LootGenerator";
+import { BotGenerationCacheService } from "@spt/services/BotGenerationCacheService";
+import { BotLootCacheService } from "@spt/services/BotLootCacheService";
+import { BotNameService } from "@spt/services/BotNameService";
+import { RaidTimeAdjustmentService } from "@spt/services/RaidTimeAdjustmentService";
+import { ICloner } from "@spt/utils/cloners/ICloner";
+import { IEndLocalRaidRequestData } from "@spt/models/eft/match/IEndLocalRaidRequestData";
+import { ItemHelper } from "@spt/helpers/ItemHelper";
+import { InventoryHelper } from "@spt/helpers/InventoryHelper";
+import { IQuestStatus } from "@spt/models/eft/common/tables/IBotBase";
+import { IItem } from "@spt/models/eft/common/tables/IItem";
+import { Traders } from "@spt/models/enums/Traders";
 
 @injectable()
-export class KeepEquipment extends InraidController {
+export class KeepEquipment extends LocationLifecycleService {
 	private config: KConfig = require("../config/config");
 
-	constructor(@inject("WinstonLogger") logger: ILogger,
-		@inject("SaveServer") saveServer: SaveServer,
-		@inject("TimeUtil") timeUtil: TimeUtil,
-		@inject("DatabaseService") databaseService: DatabaseService,
-		@inject("PmcChatResponseService") pmcChatResponseService: PmcChatResponseService,
-		@inject("MatchBotDetailsCacheService") matchBotDetailsCacheService: MatchBotDetailsCacheService,
-		@inject("QuestHelper") questHelper: QuestHelper,
-		@inject("ItemHelper") itemHelper: ItemHelper,
-		@inject("ProfileHelper") profileHelper: ProfileHelper,
-		@inject("PlayerScavGenerator") playerScavGenerator: PlayerScavGenerator,
-		@inject("HealthHelper") healthHelper: HealthHelper,
-		@inject("TraderHelper") traderHelper: TraderHelper,
-		@inject("TraderServicesService") traderServicesService: TraderServicesService,
-		@inject("LocalisationService") localisationService: LocalisationService,
-		@inject("InsuranceService") insuranceService: InsuranceService,
-		@inject("InRaidHelper") inRaidHelper: InRaidHelper,
-		@inject("ApplicationContext") applicationContext: ApplicationContext,
-		@inject("ConfigServer") configServer: ConfigServer,
-		@inject("MailSendService") mailSendService: MailSendService,
-		@inject("RandomUtil") randomUtil: RandomUtil
+	constructor(@inject("PrimaryLogger") protected logger: ILogger,
+		@inject("HashUtil") protected hashUtil: HashUtil,
+		@inject("SaveServer") protected saveServer: SaveServer,
+		@inject("TimeUtil") protected timeUtil: TimeUtil,
+		@inject("RandomUtil") protected randomUtil: RandomUtil,
+		@inject("ProfileHelper") protected profileHelper: ProfileHelper,
+		@inject("DatabaseService") protected databaseService: DatabaseService,
+		@inject("InRaidHelper") protected inRaidHelper: InRaidHelper,
+		@inject("HealthHelper") protected healthHelper: HealthHelper,
+		@inject("QuestHelper") protected questHelper: QuestHelper,
+		@inject("MatchBotDetailsCacheService") protected matchBotDetailsCacheService: MatchBotDetailsCacheService,
+		@inject("PmcChatResponseService") protected pmcChatResponseService: PmcChatResponseService,
+		@inject("PlayerScavGenerator") protected playerScavGenerator: PlayerScavGenerator,
+		@inject("TraderHelper") protected traderHelper: TraderHelper,
+		@inject("LocalisationService") protected localisationService: LocalisationService,
+		@inject("InsuranceService") protected insuranceService: InsuranceService,
+		@inject("BotLootCacheService") protected botLootCacheService: BotLootCacheService,
+		@inject("ConfigServer") protected configServer: ConfigServer,
+		@inject("BotGenerationCacheService") protected botGenerationCacheService: BotGenerationCacheService,
+		@inject("MailSendService") protected mailSendService: MailSendService,
+		@inject("RaidTimeAdjustmentService") protected raidTimeAdjustmentService: RaidTimeAdjustmentService,
+		@inject("BotNameService") protected botNameService: BotNameService,
+		@inject("LootGenerator") protected lootGenerator: LootGenerator,
+		@inject("ApplicationContext") protected applicationContext: ApplicationContext,
+		@inject("LocationLootGenerator") protected locationLootGenerator: LocationLootGenerator,
+		@inject("PrimaryCloner") protected cloner: ICloner,
+		@inject("ItemHelper") protected itemHelper: ItemHelper,
+		@inject("InventoryHelper") protected inventoryHelper: InventoryHelper
 	) {
-		super(logger, saveServer, timeUtil, databaseService, pmcChatResponseService, matchBotDetailsCacheService, questHelper, itemHelper, profileHelper,
-			playerScavGenerator, healthHelper, traderHelper, traderServicesService, localisationService, insuranceService, inRaidHelper, applicationContext,
-			configServer, mailSendService, randomUtil);
+		super(logger, hashUtil, saveServer, timeUtil, randomUtil, profileHelper, databaseService, inRaidHelper, healthHelper, questHelper, 
+			matchBotDetailsCacheService, pmcChatResponseService, playerScavGenerator, traderHelper, localisationService, insuranceService, botLootCacheService,
+			configServer, botGenerationCacheService, mailSendService, raidTimeAdjustmentService, 
+			botNameService, lootGenerator, applicationContext, locationLootGenerator, cloner);
 	}
 
-	/**
-     * Handle updating player profile post-pmc raid
-     * @param sessionID session id
-     * @param postRaidData post-raid data
-     */
-	protected override savePmcProgress(sessionID: string, postRaidData: ISaveProgressRequestData): void {
-		if (postRaidData.exit == PlayerRaidEndState.SURVIVED) {
-			super.savePmcProgress(sessionID, postRaidData);
+	protected override handlePostRaidPmc(sessionId: string, preRaidData: IPmcData, scavProfile: IPmcData, isDead: boolean, isSurvived: boolean, 
+		isTransfer: boolean, request: IEndLocalRaidRequestData, locationName: string): void {
+		if (!isDead) {
+			super.handlePostRaidPmc(sessionId, preRaidData, scavProfile, isDead, isSurvived, isTransfer, request, locationName);
 			return;
 		}
 
-		const currentProfile = this.saveServer.getProfile(sessionID);
-		let preRaidData: IPmcData = currentProfile.characters.pmc;
+		const postRaidProfile = request.results.profile;
+		const preRaidDataClone = this.cloner.clone(preRaidData.Quests);
+		const lostQuestItems = this.profileHelper.getQuestItemsInProfile(postRaidProfile);
 
-		currentProfile.inraid.character = "pmc";
+		this.updateInventory(preRaidData, postRaidProfile, sessionId, lostQuestItems);
 
-		// Sets xp, skill fatigue, location status, encyclopedia, etc
-		this.updateProfile(preRaidData, postRaidData, sessionID);
+		this.updateProfile(preRaidData, postRaidProfile, sessionId, preRaidDataClone);
+
+		const fenceId = Traders.FENCE;
+
+		const currentFenceStanding = postRaidProfile.TradersInfo[fenceId].standing;
+		preRaidData.TradersInfo[fenceId].standing = Math.min(Math.max(currentFenceStanding, -7), 15);
+
+		scavProfile.TradersInfo[fenceId] = preRaidData.TradersInfo[fenceId];
+
+		this.mergePmcAndScavEncyclopedias(preRaidData, scavProfile);
 		
-		if (!this.config.retainFoundInRaidStatus) {
-			postRaidData.profile = this.inRaidHelper.removeSpawnedInSessionPropertyFromItems(postRaidData.profile);
+		if (this.config.saveVitality) {
+			this.healthHelper.updateProfileHealthPostRaid(preRaidData, postRaidProfile.Health, sessionId, true);
 		}
 
-		postRaidData.profile.Inventory.items = 
-			this.itemHelper.replaceIDs(postRaidData.profile.Inventory.items, postRaidData.profile,  preRaidData.InsuredItems, postRaidData.profile.Inventory.fastPanel);
+		if (this.config.killerMessages) {
+			this.pmcChatResponseService.sendKillerResponse(sessionId, preRaidData, postRaidProfile.Stats.Eft.Aggressor);
+		}
 		
-		this.inRaidHelper.addStackCountToMoneyFromRaid(postRaidData.profile.Inventory.items);
+		this.matchBotDetailsCacheService.clearCache();
+
+		if (this.config.victimMessages) {
+			const victims = postRaidProfile.Stats.Eft.Victims.filter(
+				(victim) => ["pmcbear", "pmcusec"].includes(victim.Role.toLowerCase())
+			);
+			if (victims?.length > 0) {
+				this.pmcChatResponseService.sendVictimResponse(sessionId, victims, preRaidData);
+			}
+		}
+
+		this.handleInsuredItemLostEvent(sessionId, preRaidData, request, locationName);
+	}
+
+	private updateInventory(preRaidData: IPmcData, postRaidData: IPmcData, sessionID: string, lostQuestItems: IItem[]) {
+		if (!this.config.keepQuestItems) {
+			for (const item of lostQuestItems) {
+				this.inventoryHelper.removeItem(postRaidData, item._id, sessionID);
+			}
+
+			this.checkForAndFixPickupQuestsAfterDeath(sessionID, lostQuestItems, preRaidData.Quests);
+		}
 
 		if (this.config.keepItemsFoundInRaid) {
-			this.inRaidHelper.setInventory(sessionID, preRaidData, postRaidData.profile);
+			this.inRaidHelper.setInventory(sessionID, preRaidData, postRaidData, this.config.retainFoundInRaidStatus, false);
 		} else if (this.config.keepItemsInSecureContainer) {
-			const securedContainer = this.getSecuredContainerAndChildren(postRaidData.profile.Inventory.items);
+			const securedContainer = this.getSecuredContainerAndChildren(postRaidData.Inventory.items);
 
 			if (securedContainer) {
 				preRaidData = this.profileHelper.removeSecureContainer(preRaidData);
@@ -98,131 +141,68 @@ export class KeepEquipment extends InraidController {
 			}
 		}
 
-		if (this.config.saveVitality) {
-			this.healthHelper.saveVitality(preRaidData, postRaidData.health, sessionID);
-		} else {
-			// This should remove any effects on the body
-			for (const id in preRaidData.Health.BodyParts) {
-				const bodyPart: IBotHealth = preRaidData.Health.BodyParts[id];
-				bodyPart.Effects = undefined;
-			}
-
-			for (const id in postRaidData.health.Health) {
-				const bodyPart: ISyncHealth = preRaidData.Health.BodyParts[id];
-				bodyPart.Effects = undefined;
-			}
-		}
-
-		if (this.config.useSacredAmulet) {
-			const locationName = currentProfile.inraid.location.toLowerCase();
-			if (locationName === "lighthouse" && postRaidData.profile.Info.Side.toLowerCase() === "usec") {
-				// Decrement counter if it exists, don't go below 0
-				const remainingCounter = preRaidData?.Stats.Eft.OverallCounters.Items.find((x) =>
-					x.Key.includes("UsecRaidRemainKills")
-				);
-				if (remainingCounter?.Value > 0) {
-					remainingCounter.Value--;
-				}
-			}
-		}
-
-		const isDead = this.isPlayerDead(postRaidData.exit);
-		if (isDead) {
-			this.pmcChatResponseService.sendKillerResponse(sessionID, preRaidData, postRaidData.profile.Stats.Eft.Aggressor);
-			this.matchBotDetailsCacheService.clearCache();
-		}
-
-		const victims = postRaidData.profile.Stats.Eft.Victims.filter(x => x.Role === "sptBear" || x.Role === "sptUsec");
-		if (victims?.length > 0) {
-			this.pmcChatResponseService.sendVictimResponse(sessionID, victims, preRaidData);
+		if (!this.config.retainFoundInRaidStatus) {
+			this.inRaidHelper.removeFiRStatusFromItemsInContainer(sessionID, preRaidData, preRaidData.Inventory.equipment)
 		}
 	}
 
-	private updateProfile(preRaidData: IPmcData, saveProgress: ISaveProgressRequestData, sessionID: string): void {
-		// Resets skill fatigue, I see no reason to have this be configurable.
-		for (const skill of saveProgress.profile.Skills.Common) {
-			skill.PointsEarnedDuringSession = 0.0;
-		}
-
-		// Level
-		if (this.config.profileSaving.level) {
-			preRaidData.Info.Level = saveProgress.profile.Info.Level;
-		}
-
-		// Skills
-		if (this.config.profileSaving.skills) {
-			preRaidData.Skills = saveProgress.profile.Skills;
-		}
-
-		// Stats
-		if (this.config.profileSaving.stats) {
-			preRaidData.Stats.Eft = saveProgress.profile.Stats.Eft;
-		}
-		
-		// Encyclopedia
-		if (this.config.profileSaving.encyclopedia) {
-			preRaidData.Encyclopedia = saveProgress.profile.Encyclopedia;
-		}
-		
-		// Quest progress
-		if (this.config.profileSaving.questProgress) {
-			preRaidData.TaskConditionCounters = saveProgress.profile.TaskConditionCounters;
-
-			this.validateTaskConditionCounters(saveProgress, preRaidData);
-		}
-		
-		// Survivor class
-		if (this.config.profileSaving.survivorClass) {
-			preRaidData.SurvivorClass = saveProgress.profile.SurvivorClass;
-		}
-
-		// Experience
-		if (this.config.profileSaving.experience) {
-			preRaidData.Info.Experience += preRaidData.Stats.Eft.TotalSessionExperience;
-			preRaidData.Stats.Eft.TotalSessionExperience = 0;
-		}
-
-		this.saveServer.getProfile(sessionID).inraid.location = "none";
-	}
-
-	// private modifyStats(originalStats: IEftStats, postRaidStats: IEftStats) {
-		
-	// }
-
-	// I just yoinked this straight from InRaidHelper
-	private validateTaskConditionCounters(saveProgressRequest: ISaveProgressRequestData, preRaidData: IPmcData): void {
-		for (const backendCounterKey in saveProgressRequest.profile.TaskConditionCounters) {
-			// Skip counters with no id
-			if (!saveProgressRequest.profile.TaskConditionCounters[backendCounterKey].id) {
-				continue;
-			}
-
-			const postRaidValue = saveProgressRequest.profile.TaskConditionCounters[backendCounterKey]?.value;
-			if (typeof postRaidValue === "undefined") {
-				// No value, skip
-				continue;
-			}
-
-			const matchingPreRaidCounter = preRaidData.TaskConditionCounters[backendCounterKey];
-			if (!matchingPreRaidCounter) {
-				this.logger.error(this.localisationService.getText("inraid-unable_to_find_key_in_taskconditioncounters", backendCounterKey));
-
-				continue;
-			}
-
-			if (matchingPreRaidCounter.value !== postRaidValue) {
-				this.logger.error(this.localisationService.getText("inraid-taskconditioncounter_keys_differ",
-					{ key: backendCounterKey, oldValue: matchingPreRaidCounter.value, newValue: postRaidValue }));
-			}
-		}
-	}
-
-	private getSecuredContainerAndChildren(items: Item[]): Item[] | undefined {
+	private getSecuredContainerAndChildren(items: IItem[]): IItem[] | undefined {
 		const secureContainer = items.find((x) => x.slotId === EquipmentSlots.SECURED_CONTAINER);
 		if (secureContainer) {
 			return this.itemHelper.findAndReturnChildrenAsItems(items, secureContainer._id);
 		}
 
 		return undefined;
+	}
+
+	private updateProfile(preRaidData: IPmcData, postRaidData: IPmcData, sessionID: string, dataClone: IQuestStatus[]): void {
+		// Resets skill fatigue
+		for (const skill of postRaidData.Skills.Common) {
+			skill.PointsEarnedDuringSession = 0.0;
+		}
+
+		// Level
+		if (this.config.profileSaving.level) {
+			preRaidData.Info.Level = postRaidData.Info.Level;
+		}
+
+		// Skills
+		if (this.config.profileSaving.skills) {
+			preRaidData.Skills = postRaidData.Skills;
+		}
+
+		// Stats
+		if (this.config.profileSaving.stats) {
+			preRaidData.Stats.Eft = postRaidData.Stats.Eft;
+		}
+		
+		// Encyclopedia
+		if (this.config.profileSaving.encyclopedia) {
+			preRaidData.Encyclopedia = postRaidData.Encyclopedia;
+		}
+		
+		// Quest progress
+		if (this.config.profileSaving.questProgress) {
+			preRaidData.TaskConditionCounters = postRaidData.TaskConditionCounters;
+			preRaidData.Quests = this.processPostRaidQuests(postRaidData.Quests);
+
+			this.lightkeeperQuestWorkaround(sessionID, postRaidData.Quests, dataClone, preRaidData);
+		}
+		
+		// Survivor class
+		if (this.config.profileSaving.survivorClass) {
+			preRaidData.SurvivorClass = postRaidData.SurvivorClass;
+		}
+
+		preRaidData.WishList = postRaidData.WishList;
+
+		// Experience
+		if (this.config.profileSaving.experience) {
+			preRaidData.Info.Experience += preRaidData.Stats.Eft.TotalSessionExperience;
+		}
+
+		this.applyTraderStandingAdjustments(preRaidData.TradersInfo, postRaidData.TradersInfo);
+
+		preRaidData.Stats.Eft.TotalSessionExperience = 0;
 	}
 }

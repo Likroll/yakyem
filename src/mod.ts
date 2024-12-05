@@ -9,7 +9,7 @@ class Mod implements IPreSptLoadMod {
 	public preSptLoad(container: DependencyContainer): void {
 		if (this.config.active) {
 			container.register<KeepEquipment>("KeepEquipment", KeepEquipment);
-			container.register("InraidController", {useToken: "KeepEquipment"});
+			container.register("LocationLifecycleService", {useToken: "KeepEquipment"});
 		}
 	}
 }
