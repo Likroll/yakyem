@@ -1,8 +1,8 @@
 {
 	"active": true,
-	"keepItemsFoundInRaid": true,
-	"keepItemsInSecureContainer": false,
-	"retainFoundInRaidStatus": false,
+	"keepItemsFoundInRaid": false,
+	"keepItemsInSecureContainer": true,
+	"retainFoundInRaidStatus": true,
 	"saveVitality": false,
 	"keepQuestItems": false,
 	"killerMessages": true,
