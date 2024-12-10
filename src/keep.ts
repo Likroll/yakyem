@@ -86,9 +86,9 @@ export class KeepEquipment extends LocationLifecycleService {
 		const preRaidDataClone = this.cloner.clone(preRaidData.Quests);
 		const lostQuestItems = this.profileHelper.getQuestItemsInProfile(postRaidProfile);
 
-		this.updateInventory(preRaidData, postRaidProfile, sessionId, lostQuestItems);
-
 		this.updateProfile(preRaidData, postRaidProfile, sessionId, preRaidDataClone);
+
+		this.updateInventory(preRaidData, postRaidProfile, sessionId, lostQuestItems);
 
 		const fenceId = Traders.FENCE;
 
@@ -129,6 +129,9 @@ export class KeepEquipment extends LocationLifecycleService {
 
 			this.checkForAndFixPickupQuestsAfterDeath(sessionID, lostQuestItems, preRaidData.Quests);
 		}
+
+		postRaidData.Inventory.items = 
+			this.itemHelper.replaceIDs(postRaidData.Inventory.items, postRaidData, postRaidData.InsuredItems, postRaidData.Inventory.fastPanel);
 
 		if (this.config.keepItemsFoundInRaid) {
 			this.inRaidHelper.setInventory(sessionID, preRaidData, postRaidData, this.config.retainFoundInRaidStatus, false);
@@ -182,7 +185,7 @@ export class KeepEquipment extends LocationLifecycleService {
 		}
 		
 		// Quest progress
-		if (this.config.profileSaving.questProgress) {
+		if (this.config.profileSaving.questProgress || !this.config.keepQuestItems) {
 			preRaidData.TaskConditionCounters = postRaidData.TaskConditionCounters;
 			preRaidData.Quests = this.processPostRaidQuests(postRaidData.Quests);
 
